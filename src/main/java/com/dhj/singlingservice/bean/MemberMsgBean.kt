@@ -1,6 +1,6 @@
 package com.dhj.singlingservice.bean
 
-class MemberBean : MsgBean() {
+class MemberMsgBean : MsgBean() {
     val memberList = ArrayList<Member>()
 }
 

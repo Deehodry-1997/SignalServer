@@ -1,13 +1,9 @@
 package com.dhj.singlingservice.websocket
 
-import com.dhj.singlingservice.bean.CandidateMsgBean
-import com.dhj.singlingservice.bean.Member
-import com.dhj.singlingservice.bean.MemberBean
-import com.dhj.singlingservice.bean.SdpMsgBean
+import com.dhj.singlingservice.bean.*
 import com.google.gson.Gson
 import org.json.JSONObject
 import org.springframework.stereotype.Component
-import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import javax.websocket.*
 import javax.websocket.server.PathParam
@@ -31,6 +27,10 @@ class WebSocket {
     //json解析
     @OnOpen
     fun onOpen(session: Session, @PathParam(value = "id") id: String) {
+        if(connections.keys.contains(id)){
+            session.close(CloseReason(CloseReason.CloseCodes.CLOSED_ABNORMALLY, "您已登录"))
+            return
+        }
         this.id = id
         //默认客户端，没有重名
         this.session = session
@@ -44,6 +44,11 @@ class WebSocket {
             if (this === connections[name]) {
                 connections.remove(name)
                 println("【${name}退出成功】当前连接人数为：${ connections.size}")
+                connections.values.forEach{
+                    it.session?.apply {
+                        sendAllMembers(this)
+                    }
+                }
                 break
             }
         }
@@ -61,21 +66,37 @@ class WebSocket {
         val jsonResult = JSONObject(message)
         when(val act = jsonResult.getString("act")){
             "getMembers" -> {
-                session.basicRemote.sendText(
-                    JSONObject(
-                        MemberBean().apply {
-                            this.act = act
-                            connections.keys.forEach {
-                                memberList.add(Member(id = it, name = connections[it]!!.name))
-                            }
-                        }
-                    ).toString()
-                )
+                sendAllMembers(session)
             }
 
             "setName" -> {
                 name = jsonResult.getString("name")
                 println("【webSocket连接成功】当前连接人数为：" + connections.size + "，此人为：" + name)
+                connections.values.forEach{
+                    it.session?.apply {
+                        sendAllMembers(this)
+                    }
+                }
+            }
+
+            "call" -> {
+                val callMsgBean = gson.fromJson(message, CallMsgBean::class.java)
+                connections.keys.forEach {
+                    if(it == callMsgBean.toId){
+                        when(callMsgBean.type){
+                            "call" -> {
+                                callMsgBean.type = "byCall"
+                                sendMsg(connections[it]!!.session!!, JSONObject(callMsgBean))
+                            }
+                            "answer" -> {
+                                sendMsg(connections[it]!!.session!!, JSONObject(callMsgBean))
+                            }
+                            "cancel" -> {
+                                sendMsg(connections[it]!!.session!!, JSONObject(callMsgBean))
+                            }
+                        }
+                    }
+                }
             }
 
             "sendSdpMsg" -> {
@@ -110,5 +131,24 @@ class WebSocket {
                 }
             }
         }
+    }
+
+    private fun sendAllMembers(session: Session){
+        sendMsg(
+            session,
+            JSONObject(
+                MemberMsgBean().apply {
+                    this.act = "getMembers"
+                    connections.keys.forEach {
+                        memberList.add(Member(id = it, name = connections[it]!!.name))
+                    }
+                }
+            )
+        )
+    }
+
+    private fun sendMsg(session: Session, msg:JSONObject){
+        println("给${name}发送${msg}")
+        session.basicRemote.sendText(msg.toString())
     }
 }
